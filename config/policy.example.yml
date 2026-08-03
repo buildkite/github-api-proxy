@@ -1,0 +1,13 @@
+pipelines:
+  0184990a-0000-0000-0000-000000000001:
+    organization_id: 0184990a-0000-0000-0000-000000000002
+    build_sources: [ui]
+    branches: [main]
+    runner_environments: [buildkite-hosted]
+    repositories:
+      example/repository:
+        github_repository_id: 123456789
+        installation_id: 987654321
+        surfaces: [ci-v1]
+        permissions:
+          contents: read
