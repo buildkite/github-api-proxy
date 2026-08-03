@@ -72,12 +72,12 @@ func Run(ctx context.Context, getenv Getenv) error {
 		return err
 	}
 	verifier, err := oidc.NewVerifier(startupContext, oidc.Config{
-		Issuer:             oidcIssuer,
-		Audience:           config.publicURL,
-		JWKSURL:            oidcJWKSURL,
-		ClockSkew:          30 * time.Second,
-		MinimumLifetime:    30 * time.Second,
-		MinRefreshInterval: time.Minute,
+		Issuer:          oidcIssuer,
+		Audience:        config.publicURL,
+		JWKSURL:         oidcJWKSURL,
+		ClockSkew:       30 * time.Second,
+		MinimumLifetime: 30 * time.Second,
+		RefreshInterval: time.Minute,
 	})
 	if err != nil {
 		return err

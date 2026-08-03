@@ -62,10 +62,11 @@ type mintRequest struct {
 }
 
 type mintResponse struct {
-	Token        string            `json:"token"`
-	ExpiresAt    time.Time         `json:"expires_at"`
-	Permissions  map[string]string `json:"permissions"`
-	Repositories []struct {
+	Token               string            `json:"token"`
+	ExpiresAt           time.Time         `json:"expires_at"`
+	Permissions         map[string]string `json:"permissions"`
+	RepositorySelection string            `json:"repository_selection"`
+	Repositories        []struct {
 		ID int64 `json:"id"`
 	} `json:"repositories"`
 }
@@ -167,7 +168,7 @@ func (c *Client) InstallationToken(ctx context.Context, request TokenRequest) (T
 }
 
 func matchesAuthority(response mintResponse, request TokenRequest) bool {
-	if len(response.Repositories) != 1 || response.Repositories[0].ID != request.RepositoryID {
+	if response.RepositorySelection != "selected" || len(response.Repositories) != 1 || response.Repositories[0].ID != request.RepositoryID {
 		return false
 	}
 	for name, level := range request.Permissions {

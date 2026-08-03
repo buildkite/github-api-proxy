@@ -37,7 +37,7 @@ func TestClientMintsRepositoryAttenuatedInstallationToken(t *testing.T) {
 			"token":                "github-installation-secret",
 			"expires_at":           now.Add(time.Hour).Format(time.RFC3339),
 			"permissions":          map[string]string{"contents": "read", "metadata": "read"},
-			"repository_selection": "all",
+			"repository_selection": "selected",
 			"repositories":         []map[string]any{{"id": int64(123456789)}},
 		})
 	}))
@@ -109,6 +109,46 @@ func TestClientRejectsInstallationTokenWithUnexpectedAuthority(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("InstallationToken() error = nil, want unexpected authority error")
+	}
+}
+
+func TestClientRejectsInstallationWideToken(t *testing.T) {
+	t.Parallel()
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey() error = %v", err)
+	}
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(response).Encode(map[string]any{
+			"token":                "github-installation-secret",
+			"expires_at":           now.Add(time.Hour).Format(time.RFC3339),
+			"permissions":          map[string]string{"contents": "read", "metadata": "read"},
+			"repository_selection": "all",
+			"repositories":         []map[string]any{{"id": int64(123456789)}},
+		})
+	}))
+	t.Cleanup(server.Close)
+	client, err := NewClient(Config{
+		AppID:      1234,
+		PrivateKey: privateKey,
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Now:        func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	_, err = client.InstallationToken(context.Background(), TokenRequest{
+		InstallationID: 987654321,
+		RepositoryID:   123456789,
+		Permissions:    map[string]string{"contents": "read"},
+	})
+	if err == nil {
+		t.Fatal("InstallationToken() error = nil, want installation-wide authority error")
 	}
 }
 

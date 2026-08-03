@@ -86,16 +86,58 @@ func TestVerifierRefreshesUnknownKeyAtMostOncePerInterval(t *testing.T) {
 	}
 }
 
+func TestVerifierRefreshesKnownKeyAfterRefreshInterval(t *testing.T) {
+	t.Parallel()
+
+	fixture := newOIDCFixture(t)
+	retiredKey := fixture.key
+	verifier := fixture.verifier(t)
+	replacementKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey() error = %v", err)
+	}
+	fixture.key = replacementKey
+	fixture.now = fixture.now.Add(6 * time.Minute)
+	claims := claimsAt(fixture.now)
+
+	if _, err := verifier.Verify(context.Background(), signToken(t, replacementKey, "buildkite-key", claims)); err != nil {
+		t.Fatalf("Verify() replacement key error = %v", err)
+	}
+	if _, err := verifier.Verify(context.Background(), signToken(t, retiredKey, "buildkite-key", claims)); err == nil {
+		t.Fatal("Verify() retired key error = nil, want signature rejection")
+	}
+	if got := fixture.requests.Load(); got != 2 {
+		t.Fatalf("JWKS requests = %d, want initial fetch plus cache refresh", got)
+	}
+}
+
+func TestVerifierDoesNotUseExpiredKeysWhenRefreshFails(t *testing.T) {
+	t.Parallel()
+
+	fixture := newOIDCFixture(t)
+	verifier := fixture.verifier(t)
+	fixture.jwksStatus.Store(http.StatusServiceUnavailable)
+	fixture.now = fixture.now.Add(6 * time.Minute)
+
+	if _, err := verifier.Verify(context.Background(), fixture.sign(t, claimsAt(fixture.now))); err == nil {
+		t.Fatal("Verify() error = nil, want stale key rejection")
+	}
+	if got := fixture.requests.Load(); got != 2 {
+		t.Fatalf("JWKS requests = %d, want initial fetch plus failed cache refresh", got)
+	}
+}
+
 const (
 	testIssuer   = "https://agent.buildkite.com"
 	testAudience = "https://github-api-proxy.buildkite.com"
 )
 
 type oidcFixture struct {
-	now      time.Time
-	key      *rsa.PrivateKey
-	server   *httptest.Server
-	requests atomic.Int64
+	now        time.Time
+	key        *rsa.PrivateKey
+	server     *httptest.Server
+	requests   atomic.Int64
+	jwksStatus atomic.Int64
 }
 
 func newOIDCFixture(t *testing.T) *oidcFixture {
@@ -111,6 +153,10 @@ func newOIDCFixture(t *testing.T) *oidcFixture {
 	}
 	fixture.server = httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		fixture.requests.Add(1)
+		if status := fixture.jwksStatus.Load(); status != 0 {
+			response.WriteHeader(int(status))
+			return
+		}
 		response.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(response).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{
 			Key:       &fixture.key.PublicKey,
@@ -127,14 +173,14 @@ func (f *oidcFixture) verifier(t *testing.T) *Verifier {
 	t.Helper()
 
 	verifier, err := NewVerifier(context.Background(), Config{
-		Issuer:             testIssuer,
-		Audience:           testAudience,
-		JWKSURL:            f.server.URL,
-		HTTPClient:         f.server.Client(),
-		Now:                func() time.Time { return f.now },
-		ClockSkew:          30 * time.Second,
-		MinimumLifetime:    30 * time.Second,
-		MinRefreshInterval: 5 * time.Minute,
+		Issuer:          testIssuer,
+		Audience:        testAudience,
+		JWKSURL:         f.server.URL,
+		HTTPClient:      f.server.Client(),
+		Now:             func() time.Time { return f.now },
+		ClockSkew:       30 * time.Second,
+		MinimumLifetime: 30 * time.Second,
+		RefreshInterval: 5 * time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("NewVerifier() error = %v", err)

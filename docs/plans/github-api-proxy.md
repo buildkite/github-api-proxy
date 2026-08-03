@@ -141,7 +141,7 @@ The service must:
 - Pin the issuer and exact audience.
 - Allow only expected signing algorithms.
 - Validate `kid`, signature, `exp`, `nbf`, and `iat` using cached Buildkite JWKS.
-- Refresh JWKS on an unknown `kid` while bounding refresh frequency.
+- Refresh JWKS on an unknown `kid` while bounding refresh frequency, and refresh known keys after the same bounded cache lifetime before accepting them.
 - Require `sub == job_id` and all required immutable claims.
 - Require `build_branch`, `build_source`, and `runner_environment`, evaluate them against pipeline policy at exchange time, and record them in the session and exchange audit event. A missing policy input denies the exchange rather than skipping the check.
 - Reject tokens whose remaining lifetime is below a small exchange threshold.
@@ -516,7 +516,7 @@ Metrics should cover exchange outcomes, active sessions, request latency, respon
 The first standalone implementation is active. The repository currently includes:
 
 - A runnable Go service with environment configuration, graceful shutdown, health, Redis-backed readiness, and the fixed Buildkite OIDC/GitHub origins.
-- Strict RS256 OIDC verification with exact issuer/audience, required immutable and policy claims, bounded JWKS responses, and rate-limited unknown-key refresh.
+- Strict RS256 OIDC verification with exact issuer/audience, required immutable and policy claims, bounded JWKS responses, and a bounded-age, rate-limited JWKS cache.
 - Static typed YAML policy with exact repository, surface, permission, branch, source, runner, organisation, and pipeline checks.
 - HMAC-keyed Redis sessions, 256-bit opaque tokens, independent expiry checks, and atomic one-time assertion records.
 - Numeric-repository-ID GitHub App token minting with exact permissions, effective-authority response checks, and redacted upstream errors.

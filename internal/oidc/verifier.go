@@ -24,14 +24,15 @@ const (
 
 // Config fixes the OIDC trust anchor and validation bounds.
 type Config struct {
-	Issuer             string
-	Audience           string
-	JWKSURL            string
-	HTTPClient         *http.Client
-	Now                func() time.Time
-	ClockSkew          time.Duration
-	MinimumLifetime    time.Duration
-	MinRefreshInterval time.Duration
+	Issuer          string
+	Audience        string
+	JWKSURL         string
+	HTTPClient      *http.Client
+	Now             func() time.Time
+	ClockSkew       time.Duration
+	MinimumLifetime time.Duration
+	// RefreshInterval is the maximum JWKS cache age and minimum interval between refresh attempts.
+	RefreshInterval time.Duration
 }
 
 // Identity contains the signed Buildkite workload and policy inputs.
@@ -59,9 +60,10 @@ type Verifier struct {
 	minimumLifetime time.Duration
 	refreshInterval time.Duration
 
-	mu              sync.RWMutex
-	keys            map[string]*rsa.PublicKey
-	lastMissRefresh time.Time
+	mu                 sync.RWMutex
+	keys               map[string]*rsa.PublicKey
+	keysRefreshedAt    time.Time
+	lastRefreshAttempt time.Time
 }
 
 type tokenClaims struct {
@@ -83,7 +85,7 @@ func NewVerifier(ctx context.Context, config Config) (*Verifier, error) {
 	if config.Now == nil {
 		config.Now = time.Now
 	}
-	if config.ClockSkew < 0 || config.MinimumLifetime <= 0 || config.MinRefreshInterval <= 0 {
+	if config.ClockSkew < 0 || config.MinimumLifetime <= 0 || config.RefreshInterval <= 0 {
 		return nil, errors.New("OIDC validation durations are invalid")
 	}
 
@@ -107,13 +109,14 @@ func NewVerifier(ctx context.Context, config Config) (*Verifier, error) {
 		now:             config.Now,
 		clockSkew:       config.ClockSkew,
 		minimumLifetime: config.MinimumLifetime,
-		refreshInterval: config.MinRefreshInterval,
+		refreshInterval: config.RefreshInterval,
 	}
 	keys, err := verifier.fetchKeys(ctx)
 	if err != nil {
 		return nil, err
 	}
 	verifier.keys = keys
+	verifier.keysRefreshedAt = verifier.now()
 	return verifier, nil
 }
 
@@ -156,31 +159,44 @@ func (v *Verifier) Verify(ctx context.Context, raw string) (Identity, error) {
 }
 
 func (v *Verifier) key(ctx context.Context, keyID string) (*rsa.PublicKey, error) {
+	now := v.now()
 	v.mu.RLock()
 	key := v.keys[keyID]
-	lastMissRefresh := v.lastMissRefresh
+	keysRefreshedAt := v.keysRefreshedAt
+	lastRefreshAttempt := v.lastRefreshAttempt
 	v.mu.RUnlock()
-	if key != nil {
+	keysFresh := now.Before(keysRefreshedAt.Add(v.refreshInterval))
+	if key != nil && keysFresh {
 		return key, nil
 	}
-	if !lastMissRefresh.IsZero() && v.now().Sub(lastMissRefresh) < v.refreshInterval {
+	if !lastRefreshAttempt.IsZero() && now.Before(lastRefreshAttempt.Add(v.refreshInterval)) {
+		if !keysFresh {
+			return nil, errors.New("OIDC signing keys are stale")
+		}
 		return nil, errors.New("OIDC signing key not found")
 	}
 
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if key = v.keys[keyID]; key != nil {
+	now = v.now()
+	key = v.keys[keyID]
+	keysFresh = now.Before(v.keysRefreshedAt.Add(v.refreshInterval))
+	if key != nil && keysFresh {
 		return key, nil
 	}
-	if !v.lastMissRefresh.IsZero() && v.now().Sub(v.lastMissRefresh) < v.refreshInterval {
+	if !v.lastRefreshAttempt.IsZero() && now.Before(v.lastRefreshAttempt.Add(v.refreshInterval)) {
+		if !keysFresh {
+			return nil, errors.New("OIDC signing keys are stale")
+		}
 		return nil, errors.New("OIDC signing key not found")
 	}
-	v.lastMissRefresh = v.now()
+	v.lastRefreshAttempt = now
 	keys, err := v.fetchKeys(ctx)
 	if err != nil {
 		return nil, err
 	}
 	v.keys = keys
+	v.keysRefreshedAt = now
 	key = keys[keyID]
 	if key == nil {
 		return nil, errors.New("OIDC signing key not found")
