@@ -1,0 +1,38 @@
+[tools]
+go = "1.26.5"
+golangci-lint = "2.12.2"
+
+[env]
+GOTOOLCHAIN = "local"
+
+[tasks.format]
+description = "Check Go formatting"
+run = '''
+unformatted="$(gofmt -l .)"
+test -z "$unformatted" || { printf '%s\n' "$unformatted"; exit 1; }
+'''
+
+[tasks.test]
+description = "Run the Go test suite"
+run = "go test ./..."
+
+[tasks."test:race"]
+description = "Run the race-enabled Go test suite"
+run = "go test -race ./..."
+
+[tasks.lint]
+description = "Lint Go code"
+run = "golangci-lint run"
+
+[tasks.vet]
+description = "Run go vet"
+run = "go vet ./..."
+
+[tasks.build]
+description = "Build all Go commands"
+run = "go build ./..."
+
+[tasks.check]
+description = "Run formatting, build, tests, race tests, lint, and vet"
+depends = ["format", "build", "test", "test:race", "lint", "vet"]
+run = "true"
