@@ -6,7 +6,7 @@ toolchain go1.26.5
 
 require (
 	github.com/alicebob/miniredis/v2 v2.38.0
-	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/redis/go-redis/v9 v9.21.0
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
 )
